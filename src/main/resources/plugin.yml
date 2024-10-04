@@ -1,8 +1,9 @@
 name: SkinOverlay
-version: 1.7.1
-main: dev.piglin.skinoverlay.SkinOverlay
-api-version: 1.19
-authors: [ Iaiao ]
+version: 2.0.0
+main: dev.arubik.skinoverlay.SkinOverlay
+api-version: 1.21
+api: 1-21
+authors: [ Iaiao, ArubikU ]
 permissions:
   skinoverlay.wear:
     default: true

@@ -1,10 +1,10 @@
 plugins {
     id("java")
-    id("io.papermc.paperweight.userdev") version "1.3.6"
+    id("io.papermc.paperweight.userdev") version "1.7.2"
 }
 
-group = "dev.piglin"
-version = "1.8.1"
+group = "dev.arubik"
+version = "2.0"
 
 repositories {
     mavenCentral()
@@ -12,11 +12,13 @@ repositories {
 }
 
 dependencies {
-    paperDevBundle("1.19.2-R0.1-SNAPSHOT")
+  paperDevBundle("1.21-R0.1-SNAPSHOT")
+	compileOnly("io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT")
 }
 
+paperweight.reobfArtifactConfiguration = io.papermc.paperweight.userdev.ReobfArtifactConfiguration.MOJANG_PRODUCTION
 java {
-    toolchain.languageVersion.set(JavaLanguageVersion.of(17))
+    toolchain.languageVersion.set(JavaLanguageVersion.of(21))
 }
 
 tasks {
