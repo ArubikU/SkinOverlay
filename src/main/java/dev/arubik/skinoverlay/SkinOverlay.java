@@ -50,6 +50,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
     public final HashMap<UUID, String> skins = new HashMap<>();
     private final HashMap<UUID, List<String>> overlayHistory = new HashMap<>();
     private final HashMap<UUID, String> baseSkins = new HashMap<>();
+    private final HashMap<UUID, String> tempOverlays = new HashMap<>();
     private final File saveFile = new File(getDataFolder(), "save.yml");
     boolean save;
     boolean allowHttp;
@@ -149,7 +150,23 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
                         .executes(context -> clearHistory(context.getSource().getBukkitSender())))
                 .then(Commands.literal("reset")
                         .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.reset"))
-                        .executes(context -> resetSkin(context.getSource().getBukkitSender()))));
+                        .executes(context -> resetSkin(context.getSource().getBukkitSender())))
+                .then(Commands.literal("removeLastOverlay")
+                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.removelast"))
+                        .executes(context -> removeLastOverlay(context.getSource().getBukkitSender())))
+                .then(Commands.literal("addTempOverlay")
+                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.addtemp"))
+                        .then(Commands.argument("name", StringArgumentType.string())
+                                .suggests(SimpleSuggestionProvider.noTooltip("name",
+                                        context -> getOverlayList().stream()
+                                                .filter(overlay -> context.getSource().getBukkitSender()
+                                                        .hasPermission("skinoverlay.overlay." + overlay))
+                                                .toList()))
+                                .executes(context -> addTempOverlay(context.getSource().getBukkitSender(),
+                                        StringArgumentType.getString(context, "name")))))
+                .then(Commands.literal("clearTempOverlay")
+                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.cleartemp"))
+                        .executes(context -> clearTempOverlay(context.getSource().getBukkitSender()))));
 
         getServer().getPluginManager().registerEvents(new SkinRestorerListener(), this);
     }
@@ -200,6 +217,119 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private int removeLastOverlay(CommandSender sender) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(message("player only command"));
+            return 0;
+        }
+        Player player = (Player) sender;
+        UUID uuid = player.getUniqueId();
+        if (!overlayHistory.containsKey(uuid) || overlayHistory.get(uuid).isEmpty()) {
+            sender.sendMessage(message("no history"));
+            return 0;
+        }
+        List<String> history = overlayHistory.get(uuid);
+        history.remove(history.size() - 1);
+        if (history.isEmpty()) {
+            return resetSkin(sender);
+        } else {
+            String lastOverlay = history.get(history.size() - 1);
+            skins.put(uuid, lastOverlay);
+            updateSkin(player, true);
+            sender.sendMessage(message("last overlay removed"));
+            return 1;
+        }
+    }
+
+    private int addTempOverlay(CommandSender sender, String overlayName) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(message("player only command"));
+            return 0;
+        }
+        Player player = (Player) sender;
+        UUID uuid = player.getUniqueId();
+        if (!sender.hasPermission("skinoverlay.overlay." + overlayName)) {
+            sender.sendMessage(message("no permission"));
+            return 0;
+        }
+        try {
+            Image overlay = ImageIO.read(new File(getDataFolder(), overlayName + ".png"));
+            PlayerTextures textures = player.getPlayerProfile().getTextures();
+            var skin = ImageIO.read(textures.getSkin());
+
+            var image = new BufferedImage(skin.getWidth(), skin.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            var canvas = image.createGraphics();
+            canvas.drawImage(skin, 0, 0, null);
+            canvas.drawImage(overlay, 0, 0, null);
+            var stream = new ByteArrayOutputStream();
+            ImageIO.write(image, "PNG", stream);
+            canvas.dispose();
+
+            // Use the same code as in setSkin to apply the temp overlay
+            var boundary = "*****";
+            var crlf = "\r\n";
+            var twoHyphens = "--";
+            var con = (HttpsURLConnection) new URL("https://api.mineskin.org/generate/upload?visibility=1")
+                    .openConnection();
+            con.setRequestMethod("POST");
+            con.setRequestProperty("Connection", "Keep-Alive");
+            con.setRequestProperty("Cache-Control", "no-cache");
+            con.setRequestProperty("User-Agent", "SkinOverlay");
+            con.setDoOutput(true);
+            con.setRequestProperty("Content-Type", "multipart/form-data;boundary=" + boundary);
+            con.getOutputStream().write((twoHyphens + boundary + crlf).getBytes());
+            con.getOutputStream().write(("Content-Disposition: form-data; name=\"" + "file" + "\";filename=\""
+                    + "file.png" + "\"" + crlf).getBytes());
+            con.getOutputStream().write((crlf).getBytes());
+            con.getOutputStream().write(stream.toByteArray());
+            con.getOutputStream().write(crlf.getBytes());
+            con.getOutputStream().write((twoHyphens + boundary + twoHyphens + crlf).getBytes());
+            con.getOutputStream().close();
+            var status = con.getResponseCode();
+            if (status == 200) {
+                var response = JsonParser.parseString(new String(con.getInputStream().readAllBytes()));
+                var texture = response.getAsJsonObject().getAsJsonObject("data").getAsJsonObject("texture");
+                var texturesValue = texture.get("value").getAsString();
+                byte[] bytesjson = Base64.getDecoder().decode(texturesValue);
+                JsonObject jsonObject = JsonParser.parseString(new String(bytesjson, "UTF-8")).getAsJsonObject();
+                String url = jsonObject.getAsJsonObject().get("textures").getAsJsonObject().get("SKIN")
+                        .getAsJsonObject().get("url").toString();
+                tempOverlays.put(uuid, url);
+                updateSkin(player, true);
+                sender.sendMessage(message("temp overlay added"));
+                return 1;
+            } else {
+                sender.sendMessage(message("temp overlay error"));
+                return 0;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            sender.sendMessage(message("temp overlay error"));
+            return 0;
+        }
+    }
+
+    private int clearTempOverlay(CommandSender sender) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(message("player only command"));
+            return 0;
+        }
+        Player player = (Player) sender;
+        UUID uuid = player.getUniqueId();
+        if (!tempOverlays.containsKey(uuid)) {
+            sender.sendMessage(message("no temp overlay"));
+            return 0;
+        }
+        tempOverlays.remove(uuid);
+        if (skins.containsKey(uuid)) {
+            updateSkin(player, true);
+        } else {
+            resetSkin(sender);
+        }
+        sender.sendMessage(message("temp overlay cleared"));
+        return 1;
     }
 
     public int setSkin(ImageSupplier imageSupplier, CommandSender sender, ServerPlayer... players) {
@@ -293,24 +423,25 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
         try {
             com.destroystokyo.paper.profile.PlayerProfile profile = player.getPlayerProfile();
             PlayerTextures textures = player.getPlayerProfile().getTextures();
-            textures.setSkin(new URI(skins.get(player.getUniqueId()).replaceAll("\"", "")).toURL(),
-                    textures.getSkinModel());
-            profile.setTextures(textures);
-            getServer().getScheduler().runTask(this, () -> {
-                player.setPlayerProfile(profile);
-                player.hidePlayer(this, player);
-                player.showPlayer(this, player);
-                new SkinApplier().accept(player);
-                if  (forOthers) {
-                    getServer().getOnlinePlayers().stream().filter(p -> p != player).forEach(p -> {
-                        p.hidePlayer(this, player);
-                        p.showPlayer(this, player);
-                    });
-                }
-            });
-        } catch (MalformedURLException e) {
-            e.printStackTrace();
-        } catch (URISyntaxException e) {
+            String skinUrl = tempOverlays.getOrDefault(player.getUniqueId(),
+                    skins.getOrDefault(player.getUniqueId(), null));
+            if (skinUrl != null) {
+                textures.setSkin(new URI(skinUrl.replaceAll("\"", "")).toURL(), textures.getSkinModel());
+                profile.setTextures(textures);
+                getServer().getScheduler().runTask(this, () -> {
+                    player.setPlayerProfile(profile);
+                    player.hidePlayer(this, player);
+                    player.showPlayer(this, player);
+                    new SkinApplier().accept(player);
+                    if (forOthers) {
+                        getServer().getOnlinePlayers().stream().filter(p -> p != player).forEach(p -> {
+                            p.hidePlayer(this, player);
+                            p.showPlayer(this, player);
+                        });
+                    }
+                });
+            }
+        } catch (MalformedURLException | URISyntaxException e) {
             e.printStackTrace();
         }
     }
@@ -345,7 +476,8 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
             return new ArrayList<>();
         if (args.length == 2 && getServer().getPlayer(args[0]) == null)
             return Collections.singletonList("Error: player not found");
-        var overlays = getOverlayList().stream().filter(overlay -> overlay.toLowerCase().startsWith(args[args.length - 1]))
+        var overlays = getOverlayList().stream()
+                .filter(overlay -> overlay.toLowerCase().startsWith(args[args.length - 1]))
                 .collect(Collectors.toList());
         var players = getServer().getOnlinePlayers().stream().map(Player::getName)
                 .filter(name -> name.toLowerCase().startsWith(args[0])).collect(Collectors.toList());
@@ -482,8 +614,8 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
 
     private class SkinRestorerListener implements Listener {
         @EventHandler
-        public void onSkinRestore(SkinnedPlayerApplySkinEvent event) {
-            Player player = event.getPlayer();
+        public void onSkinRestore(net.skinsrestorer.api.event.SkinApplyEvent event) {
+            Player player = event.getPlayer(Player.class);
             UUID uuid = player.getUniqueId();
             if (skins.containsKey(uuid)) {
                 // Apply the overlay to the new skin

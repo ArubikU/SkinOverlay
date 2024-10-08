@@ -3,6 +3,19 @@ messages:
   unknown error: "&cUnknown error. Try again later"
   too many requests: "&eWait a few seconds and try again"
   no permission: "&cYou're not allowed to use this overlay"
+  last overlay removed: "&aLast overlay has been removed."
+  temp overlay added: "&aTemporary overlay has been added."
+  temp overlay error: "&cAn error occurred while adding the temporary overlay."
+  no temp overlay: "&cYou don't have a temporary overlay applied."
+  temp overlay cleared: "&aTemporary overlay has been cleared."
+  player only command: "&cThis command can only be used by players."
+  no history: "&cYou don't have any overlay history."
+  history header: "&6Your overlay history:"
+  history entry: "&7{index}. {overlay}"
+  history cleared: "&aYour overlay history has been cleared."
+  skin reset: "&aYour skin has been reset to the original."
+  skin reset error: "&cAn error occurred while resetting your skin. Please try again."
+  no base skin: "&cNo base skin found. Unable to reset."
 
 save: on
 allow http: off # Support both HTTP and HTTPS or only HTTPS?
