@@ -1,19 +1,42 @@
 name: SkinOverlay
-version: 2.0.0
+version: '${project.version}'
 main: dev.arubik.skinoverlay.SkinOverlay
-api-version: 1.21
-api: 1-21
-authors: [ Iaiao, ArubikU ]
+api: [1.21.1]
+api-version: '1.20'
+softdepend: [ "SkinsRestorer" ]
+authors: [Arubik]
+description: A plugin to overlay skins
 permissions:
   skinoverlay.wear:
+    description: Allows the user to wear skin overlays
     default: true
-    description: /wear
   skinoverlay.wear.others:
+    description: Allows the user to apply skin overlays to others
     default: op
-    description: /wear <player> <...>
   skinoverlay.wear.url:
-    default: true
-    description: /wear <url>
+    description: Allows the user to apply skin overlays from URLs
+    default: op
   skinoverlay.clear:
+    description: Allows the user to clear skin overlays
     default: true
-    description: /wear clear
+  skinoverlay.history:
+    description: Allows the user to view their overlay history
+    default: true
+  skinoverlay.clearhistory:
+    description: Allows the user to clear their overlay history
+    default: true
+  skinoverlay.reset:
+    description: Allows the user to reset their skin to the original
+    default: true
+  skinoverlay.removelast:
+    description: Allows the user to remove the last applied overlay
+    default: true
+  skinoverlay.addtemp:
+    description: Allows the user to add a temporary overlay
+    default: true
+  skinoverlay.cleartemp:
+    description: Allows the user to clear their temporary overlay
+    default: true
+  skinoverlay.overlay.*:
+    description: Allows the user to use all overlays
+    default: op

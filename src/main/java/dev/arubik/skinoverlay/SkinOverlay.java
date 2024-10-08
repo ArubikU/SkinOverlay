@@ -13,24 +13,24 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 import javax.imageio.ImageIO;
 import javax.net.ssl.HttpsURLConnection;
 
 import org.bukkit.ChatColor;
-import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.profile.PlayerTextures;
 import org.jetbrains.annotations.NotNull;
@@ -38,8 +38,15 @@ import org.jetbrains.annotations.NotNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 
-import dev.arubik.skinoverlay.utils.commands.SimpleSuggestionProvider;
+import io.papermc.paper.plugin.lifecycle.event.LifecycleEventManager;
+import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.server.MinecraftServer;
@@ -73,101 +80,11 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
             loadData();
         }
 
-        MinecraftServer.getServer().getCommands().getDispatcher().register(Commands.literal("wear")
-                .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.wear"))
-                .then(Commands.argument("targets", EntityArgument.players())
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.wear.others"))
-                        .then(Commands.literal("clear")
-                                .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.clear"))
-                                .executes(context -> setSkin(() -> null, context.getSource().getBukkitSender(),
-                                        EntityArgument.getPlayers(context, "targets").toArray(ServerPlayer[]::new))))
-                        .then(Commands.literal("url")
-                                .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.wear.url"))
-                                .then(Commands.argument("url", StringArgumentType.greedyString())
-                                        .executes(context -> {
-                                            String url = StringArgumentType.getString(context, "url");
-                                            return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))),
-                                                    context.getSource().getBukkitSender(),
-                                                    EntityArgument.getPlayers(context, "targets")
-                                                            .toArray(ServerPlayer[]::new));
-                                        })))
-                        .then(Commands.argument("name", StringArgumentType.string())
-                                .suggests(SimpleSuggestionProvider.noTooltip("name",
-                                        context -> getOverlayList().stream()
-                                                .filter(overlay -> context.getSource().getBukkitSender()
-                                                        .hasPermission("skinoverlay.overlay." + overlay))
-                                                .toList()))
-                                .executes(context -> {
-                                    String overlay = StringArgumentType.getString(context, "name");
-                                    if (!context.getSource().getBukkitSender()
-                                            .hasPermission("skinoverlay.overlay." + overlay)) {
-                                        context.getSource().getBukkitSender().sendMessage(message("no permission"));
-                                        return 0;
-                                    }
-                                    return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")),
-                                            context.getSource().getBukkitSender(),
-                                            EntityArgument.getPlayers(context, "targets")
-                                                    .toArray(ServerPlayer[]::new));
-                                })))
-                .then(Commands.literal("clear")
-                        .requires(sender -> sender.getBukkitSender() instanceof Player
-                                && sender.getBukkitSender().hasPermission("skinoverlay.clear"))
-                        .executes(context -> setSkin(() -> null, context.getSource().getBukkitSender(),
-                                context.getSource().getPlayerOrException())))
-                .then(Commands.literal("url")
-                        .requires(sender -> sender.getBukkitSender() instanceof Player
-                                && sender.getBukkitSender().hasPermission("skinoverlay.wear.url"))
-                        .then(Commands.argument("url", StringArgumentType.greedyString())
-                                .executes(context -> {
-                                    String url = StringArgumentType.getString(context, "url");
-                                    return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))),
-                                            context.getSource().getBukkitSender(),
-                                            context.getSource().getPlayerOrException());
-                                })))
-                .then(Commands.argument("name", StringArgumentType.string())
-                        .requires(sender -> sender.getBukkitSender() instanceof Player)
-                        .suggests(SimpleSuggestionProvider.noTooltip("name",
-                                context -> getOverlayList().stream()
-                                        .filter(overlay -> context.getSource().getBukkitSender()
-                                                .hasPermission("skinoverlay.overlay." + overlay))
-                                        .toList()))
-                        .executes(context -> {
-                            String overlay = StringArgumentType.getString(context, "name");
-                            if (!context.getSource().getBukkitSender()
-                                    .hasPermission("skinoverlay.overlay." + overlay)) {
-                                context.getSource().getBukkitSender().sendMessage(message("no permission"));
-                                return 0;
-                            }
-                            return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")),
-                                    context.getSource().getBukkitSender(),
-                                    context.getSource().getPlayerOrException());
-                        }))
-                .then(Commands.literal("history")
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.history"))
-                        .executes(context -> showHistory(context.getSource().getBukkitSender())))
-                .then(Commands.literal("clearhistory")
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.clearhistory"))
-                        .executes(context -> clearHistory(context.getSource().getBukkitSender())))
-                .then(Commands.literal("reset")
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.reset"))
-                        .executes(context -> resetSkin(context.getSource().getBukkitSender())))
-                .then(Commands.literal("removeLastOverlay")
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.removelast"))
-                        .executes(context -> removeLastOverlay(context.getSource().getBukkitSender())))
-                .then(Commands.literal("addTempOverlay")
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.addtemp"))
-                        .then(Commands.argument("name", StringArgumentType.string())
-                                .suggests(SimpleSuggestionProvider.noTooltip("name",
-                                        context -> getOverlayList().stream()
-                                                .filter(overlay -> context.getSource().getBukkitSender()
-                                                        .hasPermission("skinoverlay.overlay." + overlay))
-                                                .toList()))
-                                .executes(context -> addTempOverlay(context.getSource().getBukkitSender(),
-                                        StringArgumentType.getString(context, "name")))))
-                .then(Commands.literal("clearTempOverlay")
-                        .requires(sender -> sender.getBukkitSender().hasPermission("skinoverlay.cleartemp"))
-                        .executes(context -> clearTempOverlay(context.getSource().getBukkitSender()))));
-
+        LifecycleEventManager<Plugin> manager = this.getLifecycleManager();
+        manager.registerEventHandler(LifecycleEvents.COMMANDS, event -> {
+            Commands commands = MinecraftServer.getServer().getCommands();
+            registerCommands(commands);
+        });
         getServer().getPluginManager().registerEvents(new SkinRestorerListener(), this);
     }
 
@@ -178,21 +95,228 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
         }
     }
 
+    private void registerCommands(Commands commands) {
+
+        LiteralArgumentBuilder<CommandSourceStack> wearCommand = Commands.literal("wear")
+                .requires(source -> source.getSender().hasPermission("skinoverlay.wear"));
+
+        wearCommand
+                .then(Commands.argument("target", EntityArgument.player())
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.wear.others"))
+                        .suggests(this::suggestPlayers)
+                        .then(Commands.literal("clear")
+                                .requires(source -> source.getSender().hasPermission("skinoverlay.clear"))
+                                .executes(this::executeClearOthers))
+                        .then(Commands.literal("url")
+                                .requires(source -> source.getSender().hasPermission("skinoverlay.wear.url"))
+                                .then(Commands.argument("url", StringArgumentType.greedyString())
+                                        .executes(context -> {
+                                            try {
+                                                return executeUrlOthers(context);
+                                            } catch (Exception e) {
+                                                e.printStackTrace();
+                                                return 0;
+                                            }
+                                        })))
+                        .then(Commands.argument("name", StringArgumentType.string())
+                                .suggests(this::suggestOverlays)
+                                .executes(context -> {
+                                    try {
+                                        return executeOverlayOthers(context);
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                        return 0;
+                                    }
+                                })))
+                .then(Commands.literal("clear")
+                        .requires(source -> source.getSender() instanceof ServerPlayer
+                                && source.getSender().hasPermission("skinoverlay.clear"))
+                        .executes(this::executeClear))
+                .then(Commands.literal("url")
+                        .requires(source -> source.getSender() instanceof ServerPlayer
+                                && source.getSender().hasPermission("skinoverlay.wear.url"))
+                        .then(Commands.argument("url", StringArgumentType.greedyString())
+                                .executes(context -> {
+                                    try {
+                                        return executeUrl(context);
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                        return 0;
+                                    }
+                                })))
+                .then(Commands.argument("name", StringArgumentType.string())
+                        .requires(source -> source.getSender() instanceof ServerPlayer)
+                        .suggests(this::suggestOverlays)
+                        .executes(context -> {
+                            try {
+                                return executeOverlay(context);
+                            } catch (Exception e) {
+                                e.printStackTrace();
+                                return 0;
+                            }
+                        }))
+                .then(Commands.literal("history")
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.history"))
+                        .executes(this::executeHistory))
+                .then(Commands.literal("clearhistory")
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.clearhistory"))
+                        .executes(this::executeClearHistory))
+                .then(Commands.literal("reset")
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.reset"))
+                        .executes(this::executeReset))
+                .then(Commands.literal("removeLastOverlay")
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.removelast"))
+                        .executes(this::executeRemoveLastOverlay))
+                .then(Commands.literal("addTempOverlay")
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.addtemp"))
+                        .then(Commands.argument("name", StringArgumentType.string())
+                                .suggests(this::suggestOverlays)
+                                .executes(context -> {
+                                    try {
+                                        return executeAddTempOverlay(context);
+                                    } catch (Exception e) {
+                                        e.printStackTrace();
+                                        return 0;
+                                    }
+                                })))
+                .then(Commands.literal("clearTempOverlay")
+                        .requires(source -> source.getSender().hasPermission("skinoverlay.cleartemp"))
+                        .executes(this::executeClearTempOverlay));
+
+        commands.getDispatcher().register(wearCommand);
+    }
+
+    private CompletableFuture<Suggestions> suggestOverlays(CommandContext<CommandSourceStack> context,
+            SuggestionsBuilder builder) {
+        String input = builder.getRemaining().toLowerCase();
+        List<String> overlays = getOverlayList().stream()
+                .filter(overlay -> overlay.toLowerCase().startsWith(input))
+                .filter(overlay -> context.getSource().getSender().hasPermission("skinoverlay.overlay." + overlay))
+                .collect(Collectors.toList());
+
+        overlays.forEach(builder::suggest);
+        return builder.buildFuture();
+    }
+
+    private CompletableFuture<Suggestions> suggestPlayers(CommandContext<CommandSourceStack> context,
+            SuggestionsBuilder builder) {
+        String input = builder.getRemaining().toLowerCase();
+        List<String> players = getServer().getOnlinePlayers().stream()
+                .map(Player::getName)
+                .filter(name -> name.toLowerCase().startsWith(input))
+                .collect(Collectors.toList());
+
+        players.forEach(builder::suggest);
+        return builder.buildFuture();
+    }
+
+    private int executeClearOthers(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        CommandSender sender = context.getSource().getSender();
+        ServerPlayer target = EntityArgument.getPlayer(context, "target");
+        return setSkin(() -> null, sender, target);
+    }
+
+    private int executeUrlOthers(CommandContext<CommandSourceStack> context) throws Exception {
+        CommandSender sender = context.getSource().getSender();
+        String url = StringArgumentType.getString(context, "url");
+        ServerPlayer target = EntityArgument.getPlayer(context, "target");
+        return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))), sender, target);
+    }
+
+    private int executeOverlayOthers(CommandContext<CommandSourceStack> context) throws Exception {
+        CommandSender sender = context.getSource().getSender();
+        String overlay = StringArgumentType.getString(context, "name");
+        if (!sender.hasPermission("skinoverlay.overlay." + overlay)) {
+            sender.sendMessage(message("no permission"));
+            return 0;
+        }
+        ServerPlayer target = EntityArgument.getPlayer(context, "target");
+        return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")), sender, target);
+    }
+
+    private int executeClear(CommandContext<CommandSourceStack> context) {
+        CommandSender sender = context.getSource().getSender();
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(message("player only command"));
+            return 0;
+        }
+        return setSkin(() -> null, sender, ((CraftPlayer) (Player) sender).getHandle());
+    }
+
+    private int executeUrl(CommandContext<CommandSourceStack> context) throws Exception {
+        CommandSender sender = context.getSource().getSender();
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(message("player only command"));
+            return 0;
+        }
+        String url = StringArgumentType.getString(context, "url");
+        return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))), sender,
+                ((CraftPlayer) (Player) sender).getHandle());
+    }
+
+    private int executeOverlay(CommandContext<CommandSourceStack> context) throws Exception {
+        CommandSender sender = context.getSource().getSender();
+        if (!(sender instanceof Player)) {
+            sender.sendMessage(message("player only command"));
+            return 0;
+        }
+        String overlay = StringArgumentType.getString(context, "name");
+        if (!sender.hasPermission("skinoverlay.overlay." + overlay)) {
+            sender.sendMessage(message("no permission"));
+            return 0;
+        }
+        return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")), sender,
+                ((CraftPlayer) (Player) sender).getHandle());
+    }
+
+    private int executeHistory(CommandContext<CommandSourceStack> context) {
+        return showHistory(context.getSource().getSender());
+    }
+
+    private int executeClearHistory(CommandContext<CommandSourceStack> context) {
+        return clearHistory(context.getSource().getSender());
+    }
+
+    private int executeReset(CommandContext<CommandSourceStack> context) {
+        return resetSkin(context.getSource().getSender());
+    }
+
+    private int executeRemoveLastOverlay(CommandContext<CommandSourceStack> context) {
+        return removeLastOverlay(context.getSource().getSender());
+    }
+
+    private int executeAddTempOverlay(CommandContext<CommandSourceStack> context) throws Exception {
+        CommandSender sender = context.getSource().getSender();
+        String overlay = StringArgumentType.getString(context, "name");
+        return addTempOverlay(sender, overlay);
+    }
+
+    private int executeClearTempOverlay(CommandContext<CommandSourceStack> context) {
+        return clearTempOverlay(context.getSource().getSender());
+    }
+
     private void loadData() {
         try {
             if (!saveFile.exists()) {
                 saveFile.createNewFile();
             }
             YamlConfiguration save = YamlConfiguration.loadConfiguration(saveFile);
-            save.getConfigurationSection("skins").getValues(false).forEach((uuid, property) -> {
-                skins.put(UUID.fromString(uuid), (String) property);
-            });
-            save.getConfigurationSection("baseSkins").getValues(false).forEach((uuid, property) -> {
-                baseSkins.put(UUID.fromString(uuid), (String) property);
-            });
-            save.getConfigurationSection("overlayHistory").getValues(false).forEach((uuid, historyList) -> {
-                overlayHistory.put(UUID.fromString(uuid), (List<String>) historyList);
-            });
+            if (save.contains("skins")) {
+
+                save.getConfigurationSection("skins").getValues(false).forEach((uuid, property) -> {
+                    skins.put(UUID.fromString(uuid), (String) property);
+                });
+            }
+            if (save.contains("baseSkins")) {
+                save.getConfigurationSection("baseSkins").getValues(false).forEach((uuid, property) -> {
+                    baseSkins.put(UUID.fromString(uuid), (String) property);
+                });
+            }
+            if (save.contains("overlayHistory")) {
+                save.getConfigurationSection("overlayHistory").getValues(false).forEach((uuid, historyList) -> {
+                    overlayHistory.put(UUID.fromString(uuid), (List<String>) historyList);
+                });
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -449,7 +573,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
     public List<String> getOverlayList() {
         return getOverlayListRecursive(getDataFolder()).stream()
                 .map(t -> {
-                    return t.getPath().replace(getDataFolder().getPath() + "\\", "");
+                    return t.getPath().replace(getDataFolder().getPath() + "/", "");
                 }).filter(fileName -> fileName.endsWith(".png")).collect(Collectors.toList());
     }
 
@@ -466,23 +590,6 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
             }
         }
         return files;
-    }
-
-    @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (args.length > 2)
-            return new ArrayList<>();
-        if (args.length == 2 && !sender.hasPermission("skinoverlay.wear.others"))
-            return new ArrayList<>();
-        if (args.length == 2 && getServer().getPlayer(args[0]) == null)
-            return Collections.singletonList("Error: player not found");
-        var overlays = getOverlayList().stream()
-                .filter(overlay -> overlay.toLowerCase().startsWith(args[args.length - 1]))
-                .collect(Collectors.toList());
-        var players = getServer().getOnlinePlayers().stream().map(Player::getName)
-                .filter(name -> name.toLowerCase().startsWith(args[0])).collect(Collectors.toList());
-        return (overlays.isEmpty() && args.length == 1 && sender.hasPermission("skinoverlay.wear.others")) ? players
-                : overlays;
     }
 
     @EventHandler
@@ -509,7 +616,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
 
     private String message(String path) {
         return ChatColor.translateAlternateColorCodes('&',
-                Objects.requireNonNull(getConfig().getString("messages." + path)));
+                getConfig().getString("messages." + path));
     }
 
     private int showHistory(CommandSender sender) {
@@ -614,10 +721,10 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
 
     private class SkinRestorerListener implements Listener {
         @EventHandler
-        public void onSkinRestore(net.skinsrestorer.api.event.SkinApplyEvent event) {
+        public void onSkinRestorer(net.skinsrestorer.api.event.SkinApplyEvent event) {
             Player player = event.getPlayer(Player.class);
             UUID uuid = player.getUniqueId();
-            if (skins.containsKey(uuid)) {
+            if (overlayHistory.containsKey(uuid)) {
                 // Apply the overlay to the new skin
                 try {
                     PlayerTextures textures = player.getPlayerProfile().getTextures();
@@ -630,6 +737,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
                     e.printStackTrace();
                 }
             }
+            baseSkins.put(uuid, player.getPlayerProfile().getTextures().getSkin().toString());
         }
     }
 
