@@ -131,6 +131,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
                 .then(Commands.literal("clear")
                         .requires(source -> source.getSender() instanceof ServerPlayer
                                 && source.getSender().hasPermission("skinoverlay.clear"))
+
                         .executes(this::executeClear))
                 .then(Commands.literal("url")
                         .requires(source -> source.getSender() instanceof ServerPlayer
@@ -220,7 +221,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
         CommandSender sender = context.getSource().getSender();
         String url = StringArgumentType.getString(context, "url");
         ServerPlayer target = EntityArgument.getPlayer(context, "target");
-        return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))), sender, target);
+        return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))), url, sender, target);
     }
 
     private int executeOverlayOthers(CommandContext<CommandSourceStack> context) throws Exception {
@@ -231,7 +232,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
             return 0;
         }
         ServerPlayer target = EntityArgument.getPlayer(context, "target");
-        return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")), sender, target);
+        return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")), overlay, sender, target);
     }
 
     private int executeClear(CommandContext<CommandSourceStack> context) {
@@ -250,7 +251,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
             return 0;
         }
         String url = StringArgumentType.getString(context, "url");
-        return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))), sender,
+        return setSkin(() -> ImageIO.read(new ByteArrayInputStream(request(url))), url, sender,
                 ((CraftPlayer) (Player) sender).getHandle());
     }
 
@@ -265,7 +266,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
             sender.sendMessage(message("no permission"));
             return 0;
         }
-        return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")), sender,
+        return setSkin(() -> ImageIO.read(new File(getDataFolder(), overlay + ".png")), overlay, sender,
                 ((CraftPlayer) (Player) sender).getHandle());
     }
 
@@ -457,7 +458,12 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
     }
 
     public int setSkin(ImageSupplier imageSupplier, CommandSender sender, ServerPlayer... players) {
+        return setSkin(imageSupplier, "", sender, players);
+    }
+
+    public int setSkin(ImageSupplier imageSupplier, String name, CommandSender sender, ServerPlayer... players) {
         getServer().getScheduler().runTaskAsynchronously(this, () -> {
+
             Image overlay;
             try {
                 overlay = imageSupplier.get();
@@ -530,7 +536,9 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
                             if (!overlayHistory.containsKey(uuid)) {
                                 overlayHistory.put(uuid, new ArrayList<>());
                             }
-                            overlayHistory.get(uuid).add(url);
+                            if (name != "") {
+                                overlayHistory.get(uuid).add(name);
+                            }
                         }
                         default -> sender.sendMessage(message("unknown error"));
                     }
@@ -574,7 +582,9 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
         return getOverlayListRecursive(getDataFolder()).stream()
                 .map(t -> {
                     return t.getPath().replace(getDataFolder().getPath() + "/", "");
-                }).filter(fileName -> fileName.endsWith(".png")).collect(Collectors.toList());
+                }).filter(fileName -> fileName.endsWith(".png")).map(fileName -> {
+                    return fileName.replace(".png", "");
+                }).collect(Collectors.toList());
     }
 
     private Collection<File> getOverlayListRecursive(@NotNull File dataFolder) {
@@ -661,6 +671,7 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
         }
         Player player = (Player) sender;
         UUID uuid = player.getUniqueId();
+        overlayHistory.remove(uuid);
         if (baseSkins.containsKey(uuid)) {
             try {
                 byte[] decodedBytes = Base64.getDecoder().decode(baseSkins.get(uuid));
@@ -721,24 +732,52 @@ public final class SkinOverlay extends JavaPlugin implements Listener {
 
     private class SkinRestorerListener implements Listener {
         @EventHandler
-        public void onSkinRestorer(net.skinsrestorer.api.event.SkinApplyEvent event) {
+        public void onSkinRestorer(net.skinsrestorer.shared.api.event.SkinApplyEventImpl event) {
             Player player = event.getPlayer(Player.class);
             UUID uuid = player.getUniqueId();
-            if (overlayHistory.containsKey(uuid)) {
-                // Apply the overlay to the new skin
-                try {
-                    PlayerTextures textures = player.getPlayerProfile().getTextures();
-                    textures.setSkin(new URI(skins.get(uuid).replaceAll("\"", "")).toURL(), textures.getSkinModel());
-                    com.destroystokyo.paper.profile.PlayerProfile profile = player.getPlayerProfile();
-                    profile.setTextures(textures);
-                    player.setPlayerProfile(profile);
-                } catch (Exception e) {
-                    getLogger().warning("Failed to apply overlay for player " + player.getName());
-                    e.printStackTrace();
-                }
-            }
+            reapplyHistory(player);
             baseSkins.put(uuid, player.getPlayerProfile().getTextures().getSkin().toString());
         }
+    }
+
+    public int reapplyHistory(Player player) {
+        if (overlayHistory.containsKey(player.getUniqueId())) {
+            List<String> overlays = overlayHistory.get(player.getUniqueId());
+            List<BufferedImage> overlaysImages = List.of();
+            // overlayHistory.remove(player.getUniqueId());
+
+            for (String overlay : overlays) {
+                if (overlay.contains("https")) {
+
+                    try {
+                        overlaysImages.add(ImageIO.read(new ByteArrayInputStream(request(overlay))));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                } else {
+
+                    try {
+                        overlaysImages.add(ImageIO.read(new File(getDataFolder(), overlay + ".png")));
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+            }
+
+            var image = new BufferedImage(overlaysImages.get(0).getWidth(), overlaysImages.get(0).getHeight(),
+                    BufferedImage.TYPE_INT_ARGB);
+            var canvas = image.createGraphics();
+            for (BufferedImage imaged : overlaysImages) {
+                canvas.drawImage(imaged, 0, 0, null);
+            }
+
+            setSkin(() -> image, player, ((CraftPlayer) player).getHandle());
+            canvas.dispose();
+
+            return 1;
+        }
+        return 0;
     }
 
     @FunctionalInterface

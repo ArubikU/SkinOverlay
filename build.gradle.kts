@@ -22,9 +22,3 @@ paperweight.reobfArtifactConfiguration = io.papermc.paperweight.userdev.ReobfArt
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(21))
 }
-
-tasks {
-    assemble {
-        dependsOn(reobfJar)
-    }
-}
